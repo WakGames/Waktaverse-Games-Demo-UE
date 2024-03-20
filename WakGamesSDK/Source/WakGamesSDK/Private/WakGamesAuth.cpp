@@ -2,6 +2,7 @@
 
 
 #include "WakGamesAuth.h"
+#include "SHA256Hash.h"
 
 /** Generates a random string for the OAuth Code Verifier */
 static FString GenerateCodeVerifier()
@@ -21,18 +22,11 @@ static FString GenerateCodeVerifier()
 /** Generates the Code Challenge from the Code Verifier */
 static FString GenerateCodeChallenge(const FString& CodeVerifier)
 {
-    // CodeVerifier 문자열을 ANSI로 변환 (UTF-8 인코딩)
-    TArray<uint8> CodeVerifierBytes;
-    for (auto Char : CodeVerifier)
+    FSHA256Hash Hash;
+    Hash.FromString(CodeVerifier);
+    if (Hash.GetHash().Len() == 64) // 64자리 해시가 생성되었는지 확인
     {
-        CodeVerifierBytes.Add((uint8)Char);
-    }
-    CodeVerifierBytes.Add(0);   // Null terminator 추가 --> 본 배열이 문자열 데이터임을 명시
-
-    FSHA256Signature OutSignature;
-    if (FGenericPlatformMisc::GetSHA256Signature(CodeVerifierBytes.GetData(), CodeVerifierBytes.Num() - 1, OutSignature))
-    {
-        FString Base64Hash = FBase64::Encode(OutSignature.Signature, sizeof(OutSignature.Signature));
+        FString Base64Hash = FBase64::Encode(Hash.GetHash());   // 32바이트 해시를 64바이트 Base64 인코딩
         Base64Hash = Base64Hash.Replace(TEXT("+"), TEXT("-")).Replace(TEXT("/"), TEXT("_")).Replace(TEXT("="), TEXT(""));   // HTTP URL-safe Base64 인코딩
         return Base64Hash;
     }

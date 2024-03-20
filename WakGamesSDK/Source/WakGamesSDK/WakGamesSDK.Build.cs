@@ -8,7 +8,12 @@ public class WakGamesSDK : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
+		PublicDependencyModuleNames.AddRange(new string[] 
+		{ 
+			"Core", "CoreUObject", "Engine", "InputCore",
+			"HashSHA256" 
+		}
+			);
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 
