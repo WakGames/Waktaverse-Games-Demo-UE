@@ -10,7 +10,7 @@
  * 
  */
 UCLASS()
-class UWakgamesCallbackServer : public UObject
+class WAKGAMESSDK_API UWakgamesCallbackServer : public UObject
 {
 	GENERATED_BODY()
 	
