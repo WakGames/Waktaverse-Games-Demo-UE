@@ -5,7 +5,7 @@
 #include "SHA256Hash.h"
 
 /** Generates a random string for the OAuth Code Verifier */
-static FString GenerateCodeVerifier()
+FString UWakGamesAuth::GenerateCodeVerifier()
 {
     const FString chars = TEXT("abcdefghijklmnopqrstuvwxyz123456789");
     FString nonce;
@@ -20,7 +20,7 @@ static FString GenerateCodeVerifier()
 
 
 /** Generates the Code Challenge from the Code Verifier */
-static FString GenerateCodeChallenge(const FString& CodeVerifier)
+FString UWakGamesAuth::GenerateCodeChallenge(const FString& CodeVerifier)
 {
     FSHA256Hash Hash;
     Hash.FromString(CodeVerifier);
@@ -37,7 +37,7 @@ static FString GenerateCodeChallenge(const FString& CodeVerifier)
 
 
 /** Generates a random string for CSRF protection */
-static FString GenerateCsrfState()
+FString UWakGamesAuth::GenerateCsrfState()
 {
     const FString chars = TEXT("abcdefghijklmnopqrstuvwxyz123456789");
     FString nonce;
