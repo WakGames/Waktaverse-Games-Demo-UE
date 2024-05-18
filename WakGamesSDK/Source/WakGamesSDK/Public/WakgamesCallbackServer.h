@@ -8,8 +8,14 @@
 #include "HttpServerRequest.h"
 #include "HttpServerResponse.h"
 #include "HttpRouteHandle.h"
-#include "HttpServer.h"
-#include "WakGames.h"
+
+#include "HttpModule.h"
+#include "JsonUtilities.h"
+#include "Misc/ScopeLock.h"
+#include "GenericPlatform/GenericPlatformHttp.h"
+#include "HTTPServerModule.h"
+#include "IHttpRouter.h"
+#include "Dom/JsonObject.h"
 #include "WakgamesCallbackServer.generated.h"
 
 /**
@@ -30,18 +36,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString CodeVerifier;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(BlueprintReadOnly)
 	bool IsRunning = false;
 
 	// TokenResult
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(BlueprintReadOnly)
 	FString AccessToken;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(BlueprintReadOnly)
 	FString RefreshToken;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(BlueprintReadOnly)
 	FString IdToken;
+
+	UWakgamesCallbackServer();
 
 	UFUNCTION(BlueprintCallable, Category = "Utility|CallbackServer")
 	void StartServer(int32 ListenPort);

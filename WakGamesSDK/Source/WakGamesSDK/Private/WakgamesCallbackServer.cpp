@@ -2,6 +2,14 @@
 
 
 #include "WakgamesCallbackServer.h"
+#include "WakGames.h"
+
+UWakGames *WakGames;
+
+UWakgamesCallbackServer::UWakgamesCallbackServer()
+{
+    IsRunning = false;
+}
 
 void UWakgamesCallbackServer::StartServer(int32 ListenPort)
 {
@@ -14,11 +22,11 @@ void UWakgamesCallbackServer::StartServer(int32 ListenPort)
     FHttpServerModule* HttpServerModule = &FHttpServerModule::Get();
     if (HttpServerModule)
     {
-        HttpsRouter = HttpServerModule->GetHttpRouter(ListenPort);
+        HttpRouter = HttpServerModule->GetHttpRouter(ListenPort);
         if (HttpRouter.IsValid())
         {
-            RouteHande = HttpRouter->BindRoute(
-                FHttpPath("/callback"),
+            RouteHandle = HttpRouter->BindRoute(
+                FHttpPath(TEXT("/callback")),
                 EHttpServerRequestVerbs::VERB_GET,
                 [this](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
                 {
@@ -34,71 +42,73 @@ void UWakgamesCallbackServer::StartServer(int32 ListenPort)
         {
             UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Failed to create HttpRouter"));
         }
-    } 
+    }
 }
 
 void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
-    if (Request.RelativePath != TEXT("/callback"))
+    if (Request.RelativePath.GetPath() != TEXT("/callback"))
     {
-        // OnComplete.Execute(FHttpServerResponse(404));
-        TSharedPtr<FHttpServerResponse> Response = FHttpServerResponse::Create();
-        Response->Code = EHttpServerResponseCodes::NotFound;
-        Response->Body = FString("Not Found");
+        TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(TEXT("Not Found"), TEXT("text/plain"));
+        Response->Code = EHttpServerResponseCodes::NotFound;    // https://docs.unrealengine.com/4.26/en-US/API/Runtime/HttpServer/EHttpServerResponseCodes/
         OnComplete(MoveTemp(Response));
         return;
     }
 
-    TMap<FString, FString> QueryParams;
-    if (ParseQueryString(Request.QueryString, QueryParams))
+    const TMap<FString, FString>& QueryParams = Request.QueryParams;
+
+    FString Code, State, Error, Message;
+    if (QueryParams.Contains(TEXT("code"))) Code = QueryParams[TEXT("code")];
+    if (QueryParams.Contains(TEXT("state"))) State = QueryParams[TEXT("state")];
+    if (QueryParams.Contains(TEXT("error"))) 
     {
-        FString Code, State, Error, Message;
-        QueryParams.Find(TEXT("code"), Code);
-        QueryParams.Find(TEXT("state"), State);
-        QueryParams.Find(TEXT("error"), Error);
-        QueryParams.Find(TEXT("message"), Message);
+        UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Error = %s"), *QueryParams[TEXT("error")] );
+        Error = QueryParams[TEXT("error")];
+    }
+    if (QueryParams.Contains(TEXT("message"))) Message = QueryParams[TEXT("message")];
 
-        bool bSuccess = Error.IsEmpty() && State == CsrfState;
 
-        if(bSuccess)
+    bool bSuccess = Error.IsEmpty() && State == CsrfState;
+
+    if (bSuccess)
+    {
+        try
         {
-            try
-            {
-                {
-                    GetToken(Code);
-                    TSharedPtr<FHttpServerResponse> Response = FHttpServerResponse::Create();
-                    Response->Code = EHttpServerResponseCodes::Moved;
-                    Response->Headers.Add(TEXT("Location"), FString::Printf(TEXT("%s/oauth/authorize?success=1"), Wakgames.Host));
-                    OnComplete(MoveTemp(Response));
-                }
-            }
-            catch(const std::exception& e)
-            {
-                UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : %s"), UTF8_TO_TCHAR(e.what()));
-                bSuccess = false;
-            }
-        }
+            GetToken(Code);
+            TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(TEXT("Success"), TEXT("text/plain"));
+            Response->Code = EHttpServerResponseCodes::Moved;   // 301 Moved Permanently
 
-        if (!bSuccess)
-        {
-            TSharedPtr<FHttpServerResponse> Response = FHttpServerResponse::Create();
-            Response->Code = EHttpServerResponseCodes::BadRequest;
-            Response->Body = (Error.IsEmpty() && Message.IsEmpty()) ? TEXT("Error: Invalid State") : FString::Printf(TEXT("%s: %s"), *Error, *Message);
+            TArray<FString, FDefaultAllocator> LocationHeader;
+            LocationHeader.Add(FString::Printf(TEXT("%s/oauth/authorize?success=1"), *WakGames->GetHost()));
+            Response->Headers.Add(TEXT("Location"), MoveTemp(LocationHeader));
             OnComplete(MoveTemp(Response));
         }
+        catch (const std::exception& e)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Exception from WakGamesCallbackServer : %s"), *FString(e.what()));
+            bSuccess = false;
+        }
+    }
+
+    if (!bSuccess)  // http://localhost:65535/callback?error=400&message=AxiosError%3A%20Request%20failed%20with%20status%20code%20400
+    {
+        TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(TEXT("Bad Request"), TEXT("text/plain"));
+        Response->Code = EHttpServerResponseCodes::BadRequest;  // 400 Bad Request
+        Response->Body = TArray<uint8>((const uint8*)TCHAR_TO_UTF8(*Error), Error.Len());
+        OnComplete(MoveTemp(Response));
     }
 }
 
 void UWakgamesCallbackServer::GetToken(const FString& Code)
 {
-    FString CallbackUri = FGenericPlatformHttp::UrlEncode(FString::Printf(TEXT("http://localhost:%d/callback"), HttpRouter->GetPort()));
+    FString CallbackUri = FGenericPlatformHttp::UrlEncode(FString::Printf(TEXT("http://localhost:%d/callback"), WakGames->GetCallbackServerPort()));
     FString GetTokenUri = FString::Printf(TEXT("%s/api/oauth/token?grantType=authorization_code&clientId=%s&code=%s&verifier=%s&callbackUri=%s"),
-        *Wakgames.Host, *ClientId, *Code, *CodeVerifier, *CallbackUri);
+        *WakGames->GetHost(), *ClientId, *Code, *CodeVerifier, *CallbackUri);
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
     HttpRequest->SetURL(GetTokenUri);
     HttpRequest->SetVerb(TEXT("POST"));
-    HttpRequest->SetUserAgent(TEXT("Wakgames_Game/%s", *ClientId))
+    HttpRequest->SetHeader(TEXT("User-Agent"), FString::Printf(TEXT("Wakgames_Game/%s"), *ClientId));
     HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 
     HttpRequest->OnProcessRequestComplete().BindLambda([this](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
@@ -113,32 +123,15 @@ void UWakgamesCallbackServer::GetToken(const FString& Code)
             {
                 AccessToken = JsonObject->GetStringField(TEXT("accessToken"));
                 RefreshToken = JsonObject->GetStringField(TEXT("refreshToken"));
-                IdToken = JsonObject->GetIntegerField(TEXT("idToken"));
+                IdToken = JsonObject->GetStringField(TEXT("idToken"));
+
+                UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : Token received"));
+                UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : AccessToken = %s"), *AccessToken);
+                UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : RefreshToken = %s"), *RefreshToken);
+                UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : IdToken = %s"), *IdToken);
             }
         }
     });
 
     HttpRequest->ProcessRequest();
-}
-
-void UWakgamesCallbackServer::ParseQueryString(const FString& QueryString, TMap<FString, FString>& Params)
-{
-    FString TempQueryString = QueryString;
-    if (TempQueryString.StartsWith(TEXT("?")))
-    {
-        TempQueryString = TempQueryString.RightChop(1);
-    }
-
-    TArray<FString> Pairs;
-    TempQueryString.ParseIntoArray(Pairs, TEXT("&"), true);
-    for (const FString& Pair : Pairs)
-    {
-        FString Key, Value;
-        if (Pair.Split(TEXT("="), &Key, &Value))
-        {
-            Params.Add(FURL::Decode(Key), FURL::Decode(Value));
-        }
-    }
-
-    return Params.Num() > 0;
 }
