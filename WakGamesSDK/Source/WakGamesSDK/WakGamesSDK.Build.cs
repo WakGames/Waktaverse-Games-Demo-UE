@@ -13,7 +13,8 @@ public class WakGamesSDK : ModuleRules
 			"Core", "CoreUObject", "Engine", "InputCore",
 			"HashSHA256",
 			"HTTPServer", "HTTP",
-			"Json", "JsonUtilities"
+			"Json", "JsonUtilities",
+			"Sockets"
 		}
 			);
 

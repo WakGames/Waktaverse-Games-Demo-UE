@@ -1,10 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "WakgamesCallbackServer.h"
 #include "WakGames.h"
 
-UWakGames *WakGames;
+UWakGames* WakGames;
 
 UWakgamesCallbackServer::UWakgamesCallbackServer()
 {
@@ -19,29 +18,34 @@ void UWakgamesCallbackServer::StartServer(int32 ListenPort)
         return;
     }
 
-    FHttpServerModule* HttpServerModule = &FHttpServerModule::Get();
-    if (HttpServerModule)
+    while (ListenPort == 0)
     {
-        HttpRouter = HttpServerModule->GetHttpRouter(ListenPort);
-        if (HttpRouter.IsValid())
-        {
-            RouteHandle = HttpRouter->BindRoute(
-                FHttpPath(TEXT("/callback")),
-                EHttpServerRequestVerbs::VERB_GET,
-                [this](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
-                {
-                    HandleRequests(Request, OnComplete);
-                    return true;
-                }
-            );
+        ListenPort = FindAvailablePort();
+    }
 
-            IsRunning = true;
-            UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : Server started on port %d"), ListenPort);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Failed to create HttpRouter"));
-        }
+    FHttpServerModule& HttpServerModule = FHttpServerModule::Get();
+    HttpRouter = HttpServerModule.GetHttpRouter(ListenPort);
+  
+    if (HttpRouter.IsValid())
+    {
+        // Lambda를 TFunction으로 명시적으로 캐스팅하여 FHttpRequestHandler로 변환
+        RouteHandle = HttpRouter->BindRoute(
+            FHttpPath(TEXT("/callback")),
+            EHttpServerRequestVerbs::VERB_GET,
+            FHttpRequestHandler::CreateLambda([this](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete) -> bool
+            {
+                HandleRequests(Request, OnComplete);
+                return true;
+            })
+        );
+
+        HttpServerModule.StartAllListeners();
+        IsRunning = true;
+        UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : Server started on port %d"), ListenPort);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Failed to create HttpRouter"));
     }
 }
 
@@ -50,7 +54,7 @@ void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request, 
     if (Request.RelativePath.GetPath() != TEXT("/callback"))
     {
         TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(TEXT("Not Found"), TEXT("text/plain"));
-        Response->Code = EHttpServerResponseCodes::NotFound;    // https://docs.unrealengine.com/4.26/en-US/API/Runtime/HttpServer/EHttpServerResponseCodes/
+        Response->Code = EHttpServerResponseCodes::NotFound;
         OnComplete(MoveTemp(Response));
         return;
     }
@@ -67,7 +71,6 @@ void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request, 
     }
     if (QueryParams.Contains(TEXT("message"))) Message = QueryParams[TEXT("message")];
 
-
     bool bSuccess = Error.IsEmpty() && State == CsrfState;
 
     if (bSuccess)
@@ -76,7 +79,7 @@ void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request, 
         {
             GetToken(Code);
             TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(TEXT("Success"), TEXT("text/plain"));
-            Response->Code = EHttpServerResponseCodes::Moved;   // 301 Moved Permanently
+            Response->Code = EHttpServerResponseCodes::Moved;
 
             TArray<FString, FDefaultAllocator> LocationHeader;
             LocationHeader.Add(FString::Printf(TEXT("%s/oauth/authorize?success=1"), *WakGames->GetHost()));
@@ -90,10 +93,10 @@ void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request, 
         }
     }
 
-    if (!bSuccess)  // http://localhost:65535/callback?error=400&message=AxiosError%3A%20Request%20failed%20with%20status%20code%20400
+    if (!bSuccess)
     {
         TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(TEXT("Bad Request"), TEXT("text/plain"));
-        Response->Code = EHttpServerResponseCodes::BadRequest;  // 400 Bad Request
+        Response->Code = EHttpServerResponseCodes::BadRequest;
         Response->Body = TArray<uint8>((const uint8*)TCHAR_TO_UTF8(*Error), Error.Len());
         OnComplete(MoveTemp(Response));
     }
@@ -134,4 +137,28 @@ void UWakgamesCallbackServer::GetToken(const FString& Code)
     });
 
     HttpRequest->ProcessRequest();
+}
+
+int32 UWakgamesCallbackServer::FindAvailablePort()
+{
+    ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+    TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
+
+    Addr->SetAnyAddress();
+    Addr->SetPort(0);
+  
+    FSocket* Socket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("FindAvailablePort"), false);
+  
+    bool bBindSuccess = Socket->Bind(*Addr);
+  
+    if (!bBindSuccess)
+    {
+        Socket->Close();
+        return 0;
+    }
+
+    int32 Port = Socket->GetPortNo();
+  
+    Socket->Close();
+    return Port;
 }

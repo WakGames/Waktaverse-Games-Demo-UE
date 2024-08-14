@@ -4,19 +4,24 @@
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
-#include "HttpServerModule.h"
 #include "HttpServerRequest.h"
 #include "HttpServerResponse.h"
 #include "HttpRouteHandle.h"
 
 #include "HttpModule.h"
 #include "JsonUtilities.h"
-#include "Misc/ScopeLock.h"
 #include "GenericPlatform/GenericPlatformHttp.h"
-#include "HTTPServerModule.h"
 #include "IHttpRouter.h"
 #include "Dom/JsonObject.h"
+
+#include "HttpServerModule.h"
+#include "HttpPath.h"
+#include "Sockets.h"
+#include "SocketSubsystem.h"
+
 #include "WakgamesCallbackServer.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogWakgamesCallbackServer, Log, All);
 
 /**
  * 
@@ -61,7 +66,8 @@ private:
 	/** 콜백 요청 처리, 쿼리 파라미터 분석하여 토큰 get ? 리다이렉션 : 오류 로그 */
 	void HandleRequests(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
 	void GetToken(const FString& Code);
-	void ParseQueryString(const FString& QueryString, TMap<FString, FString>& Params);
+	// void ParseQueryString(const FString& QueryString, TMap<FString, FString>& Params);
+	int32 FindAvailablePort();
 
 	// void StopServer();
 };
