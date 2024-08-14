@@ -51,7 +51,7 @@ void UWakgamesCallbackServer::StartServer(int32 ListenPort)
 
 void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
-    if (Request.RelativePath.GetPath() != TEXT("/callback"))
+    if (Request.RelativePath.GetPath().Left(9).Equals(TEXT("/callback"), ESearchCase::IgnoreCase))
     {
         TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(TEXT("Not Found"), TEXT("text/plain"));
         Response->Code = EHttpServerResponseCodes::NotFound;
