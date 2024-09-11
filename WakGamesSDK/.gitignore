@@ -1,3 +1,7 @@
+# JetBrains IDE (Rider) associated files
+.idea/
+Plugins/Developer/RiderLink/
+
 # Visual Studio 2015 user specific files
 .vs/
 
