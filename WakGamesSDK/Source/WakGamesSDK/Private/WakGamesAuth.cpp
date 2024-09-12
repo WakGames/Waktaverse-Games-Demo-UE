@@ -9,9 +9,12 @@ FString UWakGamesAuth::GenerateCodeVerifier()
 {
     const FString chars = TEXT("abcdefghijklmnopqrstuvwxyz123456789");
     FString nonce;
-    for (int32 i = 0; i < 128; i++) // nonce : char[128]
+    int32 nonceLength = 128;
+    nonce.Reserve(nonceLength);
+    int32 CharLength = chars.Len();
+    for (int32 i = 0; i < nonceLength; i++) // nonce : char[128]
     {
-        int32 index = FMath::RandRange(0, chars.Len() - 1);
+        int32 index = FMath::RandRange(0, CharLength - 1);
         nonce.AppendChar(chars[index]);
     }
 
@@ -41,9 +44,12 @@ FString UWakGamesAuth::GenerateCsrfState()
 {
     const FString chars = TEXT("abcdefghijklmnopqrstuvwxyz123456789");
     FString nonce;
-    for (int32 i = 0; i < 16; i++) // nonce : char[16]
+    int32 nonceLength = 16;
+    nonce.Reserve(nonceLength);
+    int32 CharLength = chars.Len();
+    for (int32 i = 0; i < nonceLength; i++) // nonce : char[16]
     {
-        int32 index = FMath::RandRange(0, chars.Len() - 1);
+        int32 index = FMath::RandRange(0, CharLength - 1);
         nonce.AppendChar(chars[index]);
     }
 

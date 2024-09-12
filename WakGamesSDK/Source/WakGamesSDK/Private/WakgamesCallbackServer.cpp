@@ -2,25 +2,76 @@
 
 #include "WakgamesCallbackServer.h"
 #include "WakGames.h"
+#include "WakGames_GameInstance.h"
 
-UWakGames* WakGames;
+#include "Kismet/GameplayStatics.h"
 
 UWakgamesCallbackServer::UWakgamesCallbackServer()
 {
-    IsRunning = false;
+    SetbRunning(false);
+    WakGames = nullptr;
 }
 
-void UWakgamesCallbackServer::StartServer(int32 ListenPort)
+void UWakgamesCallbackServer::BeginDestroy()
 {
-    if (IsRunning)
+    Super::BeginDestroy();
+    StopServer();
+}
+
+void UWakgamesCallbackServer::StopServer()
+{
+    if (!GetbRunning())
     {
-        UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Server is already running"));
+        UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Server is not running"));
         return;
     }
 
-    while (ListenPort == 0)
+    HttpRouter->UnbindRoute(RouteHandle);
+    FHttpServerModule::Get().StopAllListeners();
+    HttpRouter.Reset();
+    RouteHandle.Reset();
+    SetbRunning(false);
+    UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : Callback server stopped and listener unbound."));
+}
+
+void UWakgamesCallbackServer::StartServer(int32 ListenPort, UWorld* World)
+{
+    UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : dddddddddddddddd %d"), GetbRunning());
+    if (GetbRunning())
     {
-        ListenPort = FindAvailablePort();
+        UE_LOG(LogTemp, Warning, TEXT("WakGamesCallbackServer : Server is already running"));
+        StopServer();
+        StartServer(ListenPort, World);    // restart server
+        return;
+    }
+    UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : xxxxxxxxxxxxxxxxxxxxxxxx %d"), GetbRunning());
+
+
+    if (World)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Valid World context available"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Invalid World context"));
+        return;
+    }
+    // UWakGames_GameInstance 기반의 블루프린트 클래스로 작성된 GameInstance 가져오기
+    UWakGames_GameInstance* GameInstance = Cast<UWakGames_GameInstance>(UGameplayStatics::GetGameInstance(GetWorld()));
+    if (GameInstance)
+    {
+        WakGames = GameInstance->GetWakGamesInstance();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("WakGames instance is null, cannot start serverㅁㄴㄹㄴㅇㅁㄹㄴㅇㅁ"));
+        return;
+    }
+    
+    if (!WakGames)
+    {
+        UE_LOG(LogTemp, Error, TEXT("WakGames instance is null, cannot start server"));
+        return;
     }
 
     FHttpServerModule& HttpServerModule = FHttpServerModule::Get();
@@ -40,8 +91,8 @@ void UWakgamesCallbackServer::StartServer(int32 ListenPort)
         );
 
         HttpServerModule.StartAllListeners();
-        IsRunning = true;
-        UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : Server started on port %d"), ListenPort);
+        SetbRunning(true);
+        UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : Server started on port %d, (bRunning: %d)"), ListenPort, GetbRunning());
     }
     else
     {
@@ -104,6 +155,12 @@ void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request, 
 
 void UWakgamesCallbackServer::GetToken(const FString& Code)
 {
+    if (!WakGames)  // 사용 전에 WakGames 인스턴스가 올바르게 초기화되었는지 확인
+    {
+        UE_LOG(LogTemp, Error, TEXT("WakGames instance is null"));
+        return;
+    }
+    
     FString CallbackUri = FGenericPlatformHttp::UrlEncode(FString::Printf(TEXT("http://localhost:%d/callback"), WakGames->GetCallbackServerPort()));
     FString GetTokenUri = FString::Printf(TEXT("%s/api/oauth/token?grantType=authorization_code&clientId=%s&code=%s&verifier=%s&callbackUri=%s"),
         *WakGames->GetHost(), *ClientId, *Code, *CodeVerifier, *CallbackUri);
@@ -116,7 +173,14 @@ void UWakgamesCallbackServer::GetToken(const FString& Code)
 
     HttpRequest->OnProcessRequestComplete().BindLambda([this](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
     {
-        if (bWasSuccessful && Response.IsValid())
+        UE_LOG(LogTemp, Log, TEXT("HTTP Response: %s"), *Response->GetContentAsString());
+        UE_LOG(LogTemp, Log, TEXT("HTTP Response Code: %d"), Response->GetResponseCode());
+        UE_LOG(LogTemp, Log, TEXT("HTTP Response Headers:"));
+        for (const auto& Header : Response->GetAllHeaders())
+        {
+            UE_LOG(LogTemp, Log, TEXT("%s"), *Header);
+        }
+        if (bWasSuccessful && Response->GetResponseCode() == 200)
         {
             FString ResponseString = Response->GetContentAsString();
             TSharedPtr<FJsonObject> JsonObject;
@@ -139,26 +203,3 @@ void UWakgamesCallbackServer::GetToken(const FString& Code)
     HttpRequest->ProcessRequest();
 }
 
-int32 UWakgamesCallbackServer::FindAvailablePort()
-{
-    ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-    TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
-
-    Addr->SetAnyAddress();
-    Addr->SetPort(0);
-  
-    FSocket* Socket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("FindAvailablePort"), false);
-  
-    bool bBindSuccess = Socket->Bind(*Addr);
-  
-    if (!bBindSuccess)
-    {
-        Socket->Close();
-        return 0;
-    }
-
-    int32 Port = Socket->GetPortNo();
-  
-    Socket->Close();
-    return Port;
-}

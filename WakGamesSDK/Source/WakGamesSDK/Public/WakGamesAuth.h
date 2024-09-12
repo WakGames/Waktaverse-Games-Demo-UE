@@ -17,14 +17,14 @@ class WAKGAMESSDK_API UWakGamesAuth : public UObject
 	
 public:
 	/** Generates a random string for the OAuth Code Verifier */
-	UFUNCTION(BlueprintCallable, Category = "Utility|Auth")
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
 	static FString GenerateCodeVerifier();
 
 	/** Generates the Code Challenge from the Code Verifier */
-	UFUNCTION(BlueprintCallable, Category = "Utility|Auth")
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
 	static FString GenerateCodeChallenge(const FString& CodeVerifier);
 
 	/** Generates a random string for CSRF protection */
-    UFUNCTION(BlueprintCallable, Category = "Utility|Auth")
+    UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
 	static FString GenerateCsrfState();
 };
