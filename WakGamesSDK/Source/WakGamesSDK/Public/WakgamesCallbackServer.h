@@ -19,10 +19,11 @@
 #include "Sockets.h"
 #include "SocketSubsystem.h"
 
-#include "WakGames.h"
+#include "SDK/WakSDK_GameInstanceSubsystem.h"
 #include "WakgamesCallbackServer.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogWakgamesCallbackServer, Log, All);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTokenIssuedDelegate, const bool, bSuccess);
 
 /**
  * 
@@ -33,57 +34,65 @@ class WAKGAMESSDK_API UWakgamesCallbackServer : public UObject
 	GENERATED_BODY()
 	
 public:
+	// Delegate 변수: 토큰 발급이 완료되면 호출
+	UPROPERTY(BlueprintAssignable, Category = "Wakgames")
+	FOnTokenIssuedDelegate OnTokenIssued;
+	
 	UWakgamesCallbackServer();
-	UWakgamesCallbackServer(UWakGames* NewWakGames) { this->WakGames = NewWakGames; }
+	UWakgamesCallbackServer(UWakSDK_GameInstanceSubsystem* NewWakGames) { this->WakGamesSubsystem = NewWakGames; }
 	virtual void BeginDestroy() override;
 
 	UFUNCTION(BlueprintGetter, Category = "WakGames|CallbackServer")
 	FString GetClientId() const { return ClientId; }
 
 	UFUNCTION(BlueprintSetter, Category = "WakGames|CallbackServer")
-	void SetClientId(FString NewClientId) { this->ClientId = NewClientId; }
+	void SetClientId(FString NewClientId) { ensure(this != nullptr); this->ClientId = NewClientId; }
 	
 	FString GetCsrfState() const { return CsrfState; }
-	void SetCsrfState(FString NewCsrfState) { this->CsrfState = NewCsrfState; }
+	void SetCsrfState(FString NewCsrfState) { ensure(this != nullptr); this->CsrfState = NewCsrfState; }
 
 	FString GetCodeVerifier() const { return CodeVerifier; }
-	void SetCodeVerifier(FString NewCodeVerifier) { this->CodeVerifier = NewCodeVerifier; }
+	void SetCodeVerifier(FString NewCodeVerifier) { ensure(this != nullptr); this->CodeVerifier = NewCodeVerifier; }
 
 	bool GetbRunning() const { return bRunning; }
-	void SetbRunning(bool NewbRunning) { this->bRunning = NewbRunning; }
+	void SetbRunning(bool NewbRunning) { ensure(this != nullptr); this->bRunning = NewbRunning; }
 	
-	void SetWakGames(UWakGames* NewWakGames) { this->WakGames = NewWakGames; }
+	void SetWakGames(UWakSDK_GameInstanceSubsystem* NewWakGames) { ensure(this != nullptr); this->WakGamesSubsystem = NewWakGames; }
 	
 	UFUNCTION(BlueprintCallable, Category = "WakGames|CallbackServer")
-	void StartServer(int32 ListenPort, UWorld* World);
+	void StartServer(int32 ListenPort, UWakSDK_GameInstanceSubsystem* Subsystem);
 
 	UFUNCTION(BlueprintCallable, Category = "WakGames|CallbackServer")
 	void StopServer();
 
+
+
 private:
 	FHttpRouteHandle RouteHandle;
 	TSharedPtr<IHttpRouter> HttpRouter;
+	
 	// TODO: GameInstance 클래스로 옮겨서 싱글톤 패턴으로 수정
-	UWakGames* WakGames = nullptr;
+	UPROPERTY()
+	UWakSDK_GameInstanceSubsystem* WakGamesSubsystem = nullptr;
 
 	UPROPERTY(BlueprintGetter = GetClientId, BlueprintSetter = SetClientId)
 	FString ClientId = "";
 	
 	UPROPERTY(NotBlueprintable)
-	FString CsrfState;
+	FString CsrfState = "";
 
 	UPROPERTY(NotBlueprintable)
-	FString CodeVerifier;
+	FString CodeVerifier = "";
 
 	UPROPERTY(NotBlueprintable)
 	bool bRunning = false;
 
 	// TokenResult
-	FString AccessToken;
+	FString AccessToken = "";
 	
-	FString RefreshToken;
+	FString RefreshToken = "";
 	
-	FString IdToken;
+	FString IdToken = "";
 
 	
 	/** 콜백 요청 처리, 쿼리 파라미터 분석하여 토큰 get ? 리다이렉션 : 오류 로그 */
