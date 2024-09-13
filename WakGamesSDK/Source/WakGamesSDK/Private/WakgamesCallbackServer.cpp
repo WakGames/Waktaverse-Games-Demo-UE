@@ -142,26 +142,17 @@ void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request,
 
 	if (bSuccess)
 	{
-		try
-		{
-			GetToken(Code);
-			TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(
-				TEXT("Success"), TEXT("text/plain"));
-			Response->Code = EHttpServerResponseCodes::Moved;
+		GetToken(Code);
+		TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(
+			TEXT("Success"), TEXT("text/plain"));
+		Response->Code = EHttpServerResponseCodes::Moved;
 
-			TArray<FString, FDefaultAllocator> LocationHeader;
-			LocationHeader.Add(
-				FString::Printf(
-					TEXT("%s/oauth/authorize?success=1"), *WakGamesSubsystem->GetHost()));
-			Response->Headers.Add(TEXT("Location"), MoveTemp(LocationHeader));
-			OnComplete(MoveTemp(Response));
-		}
-		catch (const std::exception& e)
-		{
-			UE_LOG(LogTemp, Error, TEXT("Exception from WakGamesCallbackServer : %s"),
-			       *FString(e.what()));
-			bSuccess = false;
-		}
+		TArray<FString, FDefaultAllocator> LocationHeader;
+		LocationHeader.Add(
+			FString::Printf(
+				TEXT("%s/oauth/authorize?success=1"), *WakGamesSubsystem->GetHost()));
+		Response->Headers.Add(TEXT("Location"), MoveTemp(LocationHeader));
+		OnComplete(MoveTemp(Response));
 	}
 
 	if (!bSuccess)
