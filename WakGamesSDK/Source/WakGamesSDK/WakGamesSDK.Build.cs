@@ -10,7 +10,7 @@ public class WakGamesSDK : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] 
 		{ 
-			"Core", "CoreUObject", "Engine", "InputCore",
+			"Core", "CoreUObject", "Engine", "InputCore", "UMG",
 			"HashSHA256",
 			"HTTPServer", "HTTP",
 			"Json", "JsonUtilities",
