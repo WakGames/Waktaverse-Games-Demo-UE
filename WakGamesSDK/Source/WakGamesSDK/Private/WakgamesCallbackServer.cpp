@@ -217,6 +217,8 @@ void UWakgamesCallbackServer::GetToken(const FString& Code)
 					       *RefreshToken);
 					UE_LOG(LogTemp, Log, TEXT("WakGamesCallbackServer : IdToken = %s"), *IdToken);
 
+					WakGamesSubsystem->UpdateTokenStorage(AccessToken, RefreshToken, IdToken);
+					// TODO: BROADCAST BELOW NOT IN USE
 					OnTokenIssued.Broadcast(true);
 				}
 			}

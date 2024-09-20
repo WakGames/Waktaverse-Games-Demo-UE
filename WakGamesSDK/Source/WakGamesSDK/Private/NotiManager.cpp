@@ -2,103 +2,145 @@
 
 
 #include "NotiManager.h"
-#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
+#include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
 
-const FString UNotiManager::NotificationWidgetPath = TEXT(
-	"/Game/Levels/UI/Achievements/WBP_NotiPanel.uasset");
+FString UNotiManager::NotificationWidgetPath = TEXT("/Game/Levels/UI/Achievements/WBP_NotiPanel");
 
 UNotiManager::UNotiManager()
 {
-	// 알림창 블루프린트를 로드하여 클래스 변수에 저장
-	ConstructorHelpers::FClassFinder<UUserWidget> WidgetClassFinder(*NotificationWidgetPath);
-	if (WidgetClassFinder.Succeeded())
-	{
-		NotificationWidgetClass = WidgetClassFinder.Class;
-		UE_LOG(LogTemp, Log,
-		       TEXT("[-] NotiManager: Notification widget class loaded successfully."));
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("[-] NotiManager: Failed to load Notification widget class."));
-	}
+    // 블루프린트 위젯 클래스 로드
+    static ConstructorHelpers::FClassFinder<UUserWidget> NotificationWidgetBPClass(*NotificationWidgetPath);
+    if (NotificationWidgetBPClass.Class != nullptr)
+    {
+        NotificationWidgetClass = NotificationWidgetBPClass.Class;
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NotificationWidgetClass not found! Check the path."));
+    }
 }
 
-void UNotiManager::AddNotification(FString Title, FString Description, FString IconURL)
+void UNotiManager::AddNotification(const FString& Title, const FString& Description, const FString& IconURL)
 {
-	if (!NotificationWidgetClass)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[-] NotiManager: NotificationWidgetClass is not set."));
-		return;
-	}
+    if (NotificationWidgetClass == nullptr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NotificationWidgetClass is null."));
+        return;
+    }
 
-	// 알림창이 가득 찼을 경우, 첫 번째 알림을 제거
-	if (ActiveNotifications.Num() >= MaxNotificationsOnScreen)
-	{
-		OnNotificationExpired(ActiveNotifications[0]);
-	}
+    UWorld* World = GEngine->GetWorldFromContextObjectChecked(this);
+    if (World == nullptr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("World is null."));
+        return;
+    }
 
-	// 알림창 위젯 생성
-	if (UUserWidget* NewNotification = CreateWidget<UUserWidget>(
-		GetWorld(), NotificationWidgetClass))
-	{
-		// 알림창의 초기 위치 설정 (우측 최하단 모서리)
-		FVector2D ScreenPosition = FVector2D(290.0f, GetNextNotificationPositionY());
-		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(NewNotification->Slot))
-		{
-			CanvasSlot->SetPosition(ScreenPosition);
-		}
+    // 새로운 알림창 위젯 생성
+    UUserWidget* NewNotification = CreateWidget<UUserWidget>(World, NotificationWidgetClass);
+    if (NewNotification == nullptr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to create notification widget."));
+        return;
+    }
 
-		// 알림창을 뷰포트에 추가
-		NewNotification->AddToViewport();
+    // 위젯 초기화 (Title, Description, IconURL 설정)
+    // 위젯 블루프린트에 InitializeNotification 함수가 있다고 가정합니다.
+    UFunction* InitFunction = NewNotification->FindFunction(FName("InitializeNotification"));
+    if (InitFunction)
+    {
+        struct FInitializeNotificationParams
+        {
+            FString Title;
+            FString Description;
+            FString IconURL;
+        };
 
-		// 큐에 알림창 추가
-		ActiveNotifications.Add(NewNotification);
+        FInitializeNotificationParams Params;
+        Params.Title = Title;
+        Params.Description = Description;
+        Params.IconURL = IconURL;
 
-		// 일정 시간이 지나면 알림창을 소멸시킴
-		// TODO: 알림창이 꽉 차 먼저 소멸되는 경우에 대한 핸들링 필요 (free된걸 다시 free하려고 시도할 수 있음)
-		FTimerHandle TimerHandle;
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, NewNotification]()
-{
-	OnNotificationExpired(NewNotification);
-}, NotificationDuration, false);
-	}
+        NewNotification->ProcessEvent(InitFunction, &Params);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("InitializeNotification function not found in widget."));
+    }
+
+    // 뷰포트에 위젯 추가
+    NewNotification->AddToViewport();
+
+    // 기존 알림창들을 위로 이동
+    for (int32 i = 0; i < ActiveNotifications.Num(); ++i)
+    {
+        if (UUserWidget* Widget = ActiveNotifications[i])
+        {
+            if (UCanvasPanelSlot* CanvasSlot = UWidgetLayoutLibrary::SlotAsCanvasSlot(Widget))
+            {
+                FVector2D Position = CanvasSlot->GetPosition();
+                Position.Y -= Widget->GetDesiredSize().Y; // 위젯의 높이만큼 위로 이동
+                CanvasSlot->SetPosition(Position);
+            }
+        }
+    }
+
+    // 새로운 알림창 위치 설정
+    if (UCanvasPanelSlot* NewCanvasSlot = UWidgetLayoutLibrary::SlotAsCanvasSlot(NewNotification))
+    {
+        FVector2D NewPosition = FVector2D(290, GetNextNotificationPositionY());
+        NewCanvasSlot->SetPosition(NewPosition);
+    }
+
+    // 알림창 큐에 추가
+    ActiveNotifications.Add(NewNotification);
+
+    // 알림창 소멸 예약
+    FTimerDelegate TimerCallback;
+    TimerCallback.BindUFunction(this, FName("OnNotificationExpired"), NewNotification);
+
+    FTimerHandle TimerHandle;
+    World->GetTimerManager().SetTimer(TimerHandle, TimerCallback, NotificationDuration, false);
+
+    // 최대 알림창 수를 초과하면 가장 오래된 알림창 제거
+    if (ActiveNotifications.Num() > MaxNotificationsOnScreen)
+    {
+        UUserWidget* OldNotification = ActiveNotifications[0];
+        if (OldNotification)
+        {
+            OldNotification->RemoveFromParent();
+        }
+        ActiveNotifications.RemoveAt(0);
+    }
 }
 
 void UNotiManager::ProcessQueue()
 {
-	// 알림창의 위치 업데이트
-	for (int32 i = 0; i < ActiveNotifications.Num(); i++)
-	{
-		const FVector2D NewPosition = FVector2D(290.0f, GetNextNotificationPositionY());
-		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(ActiveNotifications[i]->Slot))
-		{
-			CanvasSlot->SetPosition(NewPosition);
-		}
-	}
+    // 타이머를 사용하여 알림창을 관리하므로, 이 함수는 필요 없을 수 있습니다.
 }
 
 void UNotiManager::OnNotificationExpired(UUserWidget* ExpiredNotification)
 {
-	if (ExpiredNotification)
-	{
-		// 뷰포트에서 알림창 제거
-		ExpiredNotification->RemoveFromParent();
-		ActiveNotifications.Remove(ExpiredNotification);
-	}
-
-	// 큐 업데이트
-	ProcessQueue();
+    if (ExpiredNotification)
+    {
+        ExpiredNotification->RemoveFromParent();
+        ActiveNotifications.Remove(ExpiredNotification);
+    }
 }
 
-/** 최하단으로부터의 desired height */
-float UNotiManager::GetNextNotificationPositionY(float NotiIndex) const
+float UNotiManager::GetNextNotificationPositionY(int32 NotiIndex) const
 {
-	constexpr float NotificationHeight = 80.0f;
-	constexpr float Padding = 0.0f;
-	NotiIndex = (NotiIndex == -1) ? ActiveNotifications.Num() : NotiIndex;
-	return (NotiIndex * (NotificationHeight + Padding));
+    // 인덱스를 기반으로 Y 위치 계산
+    const float NotificationHeight = 290.0f; // 위젯의 높이에 맞게 조정
+    const float BasePositionY = 0.0f; // 화면 아래에서 시작하는 Y 위치
+    if (NotiIndex == -1)
+    {
+        NotiIndex = ActiveNotifications.Num();
+    }
+    return BasePositionY + (NotiIndex * NotificationHeight);
 }

@@ -10,6 +10,8 @@
 #include "HttpManager.h"
 #include "Json.h"
 #include "WakgamesAuth.h"
+#include "WakSDK_TokenStorage.h"
+#include "Kismet/GameplayStatics.h"
 #include "WakSDK_GameInstanceSubsystem.generated.h"
 
 /**
@@ -43,7 +45,7 @@ struct FTokenStorage
 	{
 		AccessToken.Empty();
 		RefreshToken.Empty();
-		IdToken = 0;
+		IdToken.Empty();
 	}
 };
 
@@ -87,15 +89,19 @@ class WAKGAMESSDK_API UWakSDK_GameInstanceSubsystem : public UGameInstanceSubsys
 	GENERATED_BODY()
 	
 public:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+
+	UPROPERTY(BlueprintReadOnly, Category = "WakGames|Auth")
+	bool bLoggedIn = false;
 	
-	UFUNCTION(BlueprintCallable, Category = "WakGames")
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
 	void StartLogin();
 
-	UFUNCTION(BlueprintCallable, Category = "WakGames")
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
 	void RefreshToken();
 
-	UFUNCTION(BlueprintCallable, Category = "WakGames")
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
 	void FetchUserProfile();
 
 	UFUNCTION()
@@ -104,19 +110,55 @@ public:
 	UFUNCTION()
 	int32 GetCallbackServerPort() const { return CallbackServerPort; }
 
+	
 	// TokenStorage Related
 	UFUNCTION(NotBlueprintable)
-	void UpdateTokenStorage(const FString& NewAccessToken, const FString& NewRefreshToken, const FString& NewIdToken)
-	{
-		TokenStorage.UpdateToken(NewAccessToken, NewRefreshToken, NewIdToken);
-	}
-
-	UFUNCTION(BlueprintCallable, Category = "WakGames|Token")
+	void UpdateTokenStorage(const FString& NewAccessToken, const FString& NewRefreshToken, const FString& NewIdToken);
+		
+	UFUNCTION(NotBlueprintable)
+	bool LoadTokenStorage();
+	
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
 	void ClearTokenStorage()
 	{
 		TokenStorage.ClearToken();
 	}
 
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
+	void Logout()
+	{
+		ClearTokenStorage();
+		ClearUserProfile();
+
+		UWakSDK_TokenStorage* TokenSaveGame = Cast<UWakSDK_TokenStorage>(
+			UGameplayStatics::CreateSaveGameObject(UWakSDK_TokenStorage::StaticClass())
+		);
+
+		if (TokenSaveGame)
+		{
+			TokenSaveGame->AccessToken.Empty();
+			TokenSaveGame->RefreshToken.Empty();
+			TokenSaveGame->IdToken.Empty();
+
+			UGameplayStatics::SaveGameToSlot(TokenSaveGame, TokenSaveGame->GetSaveSlotName(), 0);
+		}
+
+		bLoggedIn = false;
+	}
+
+	UFUNCTION(BlueprintCallable, Category = "WakGames|Auth")
+	void TryAutoLogin()
+	{
+		if (LoadTokenStorage())
+		{
+			FetchUserProfile();
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("No saved token found"));
+		}
+	}
+	
 	// User Profile Related
 	UFUNCTION(BlueprintCallable, Category = "WakGames|UserProfile")
 	void updateUserProfile(const FString& NewId, const FString& NewName, const FString& NewProfileImg)
@@ -168,7 +210,7 @@ private:
 	void OnRefreshTokenResponseReceived(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
 	void OnGetUserProfileReceived(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
 
-	void ApiMethod(const FString& Api, const FString& Verb, const FString& Content, TFunction<void(FHttpResponsePtr, bool)> Callback);
+	void ApiMethod(const FString& Api, const FString& Verb, const FString& Content, TFunction<void(FHttpResponsePtr, bool)> Callback, bool bIsRetry = false);
 
 	void HandleGameExit();
 };
