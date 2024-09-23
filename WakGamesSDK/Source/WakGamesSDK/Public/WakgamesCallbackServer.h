@@ -37,33 +37,36 @@ public:
 	// Delegate 변수: 토큰 발급이 완료되면 호출
 	UPROPERTY(BlueprintAssignable, Category = "Wakgames")
 	FOnTokenIssuedDelegate OnTokenIssued;
+	void BeginDestroy() override;
 	
 	UWakgamesCallbackServer();
 	UWakgamesCallbackServer(UWakSDK_GameInstanceSubsystem* NewWakGames) { this->WakGamesSubsystem = NewWakGames; }
-	virtual void BeginDestroy() override;
 
 	UFUNCTION(BlueprintGetter, Category = "WakGames|CallbackServer")
 	FString GetClientId() const { return ClientId; }
 
 	UFUNCTION(BlueprintSetter, Category = "WakGames|CallbackServer")
-	void SetClientId(FString NewClientId) { ensure(this != nullptr); this->ClientId = NewClientId; }
+	void SetClientId(FString NewClientId) { this->ClientId = NewClientId; }
 	
 	FString GetCsrfState() const { return CsrfState; }
-	void SetCsrfState(FString NewCsrfState) { ensure(this != nullptr); this->CsrfState = NewCsrfState; }
+	void SetCsrfState(FString NewCsrfState) { this->CsrfState = NewCsrfState; }
 
 	FString GetCodeVerifier() const { return CodeVerifier; }
-	void SetCodeVerifier(FString NewCodeVerifier) { ensure(this != nullptr); this->CodeVerifier = NewCodeVerifier; }
+	void SetCodeVerifier(FString NewCodeVerifier) { this->CodeVerifier = NewCodeVerifier; }
 
 	bool GetbRunning() const { return bRunning; }
-	void SetbRunning(bool NewbRunning) { ensure(this != nullptr); this->bRunning = NewbRunning; }
+	void SetbRunning(bool NewbRunning) { this->bRunning = NewbRunning; }
 	
-	void SetWakGames(UWakSDK_GameInstanceSubsystem* NewWakGames) { ensure(this != nullptr); this->WakGamesSubsystem = NewWakGames; }
+	void SetWakGames(UWakSDK_GameInstanceSubsystem* NewWakGames) { this->WakGamesSubsystem = NewWakGames; }
 	
 	UFUNCTION(BlueprintCallable, Category = "WakGames|CallbackServer")
-	void StartServer(int32 ListenPort, UWakSDK_GameInstanceSubsystem* Subsystem);
+	bool StartServer(int32 ListenPort, UWakSDK_GameInstanceSubsystem* Subsystem);
 
 	UFUNCTION(BlueprintCallable, Category = "WakGames|CallbackServer")
 	void StopServer();
+
+	UFUNCTION(BlueprintCallable, Category = "WakGames|CallbackServer")
+	bool RestartServer(int32 ListenPort, UWakSDK_GameInstanceSubsystem* Subsystem);
 
 
 

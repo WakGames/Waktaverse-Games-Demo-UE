@@ -6,22 +6,23 @@ UWakgamesCallbackServer::UWakgamesCallbackServer()
 {
 	SetbRunning(false);
 	WakGamesSubsystem = nullptr;
-	// this->AddToRoot();
 }
 
 void UWakgamesCallbackServer::BeginDestroy()
 {
 	Super::BeginDestroy();
-	// StopServer();
+	StopServer();
+}
 
-	// if (this->IsRooted())
-	// {
-	// 	this->RemoveFromRoot();
-	// }
-	// if (!this->IsRooted())
-	// {
-	// 	this->MarkAsGarbage();
-	// }
+bool UWakgamesCallbackServer::RestartServer(int32 ListenPort,
+                                            UWakSDK_GameInstanceSubsystem* Subsystem)
+{
+	StopServer();
+	if (StartServer(ListenPort, Subsystem))
+	{
+		return true;
+	}
+	return false;
 }
 
 void UWakgamesCallbackServer::StopServer()
@@ -32,90 +33,121 @@ void UWakgamesCallbackServer::StopServer()
 		return;
 	}
 
-	if (this->IsRooted())
+	if (this)
 	{
-		this->RemoveFromRoot();
-	}
-	if (!this->IsRooted())
-	{
-		this->MarkAsGarbage();
-	}
-	
-	if (HttpRouter && RouteHandle)
-	{
-		HttpRouter->UnbindRoute(RouteHandle);
-		FHttpServerModule::Get().StopAllListeners();
-		HttpRouter.Reset();
-		RouteHandle.Reset();
-		// SetbRunning(false);
+		if (HttpRouter.IsValid())
+		{
+			if (RouteHandle.IsValid())
+			{
+				HttpRouter->UnbindRoute(RouteHandle);
+				RouteHandle.Reset();
+				UE_LOG(LogTemp, Warning,
+				       TEXT("WakGamesCallbackServer : RouteHandle unbound."));
+			}
+			
+			FHttpServerModule::Get().StopAllListeners();
+			HttpRouter.Reset();
+			UE_LOG(LogTemp, Warning,
+			       TEXT("WakGamesCallbackServer : HTTP Listener unbound."));
+		}
 
-		// this->MarkAsGarbage();
-		UE_LOG(LogTemp, Log,
-		       TEXT("WakGamesCallbackServer : Callback server stopped and listener unbound."));
+		if (this->IsRooted())
+		{
+			this->RemoveFromRoot();
+		}
+		this->MarkAsGarbage();
+		SetbRunning(false);
 	}
-	SetbRunning(false);
 }
 
-void UWakgamesCallbackServer::StartServer(int32 ListenPort,
+bool UWakgamesCallbackServer::StartServer(int32 ListenPort,
                                           UWakSDK_GameInstanceSubsystem* Subsystem)
 {
 	if (GetbRunning())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("WakGamesCallbackServer : Server is already running"));
 		StopServer();
-		StartServer(ListenPort, Subsystem); // restart server
-		return;
 	}
 
 	if (!Subsystem)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Invalid World context"));
-		return;
+		UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer: WakGamesSubsystem instance is null, cannot start server"));
+		return false;
 	}
 
-	if (Subsystem)
-	{
-		WakGamesSubsystem = Subsystem;
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("WakGamesSubsystem instance is null, cannot start server"));
-		return;
-	}
-
+	WakGamesSubsystem = Subsystem;
+	
 	FHttpServerModule& HttpServerModule = FHttpServerModule::Get();
 	HttpRouter = HttpServerModule.GetHttpRouter(ListenPort);
 
 	if (HttpRouter.IsValid())
 	{
+		// 안전한 람다 캡처를 위해 Weak Pointer 사용
+		TWeakObjectPtr<UWakgamesCallbackServer> WeakThis(this);
+		
 		// Lambda를 TFunction으로 명시적으로 캐스팅하여 FHttpRequestHandler로 변환
 		RouteHandle = HttpRouter->BindRoute(
 			FHttpPath(TEXT("/callback")),
 			EHttpServerRequestVerbs::VERB_GET,
 			FHttpRequestHandler::CreateLambda(
-				[this](const FHttpServerRequest& Request,
-				       const FHttpResultCallback& OnComplete) -> bool
+			[WeakThis](const FHttpServerRequest& Request,
+				   const FHttpResultCallback& OnComplete) -> bool
+			{
+				// 요청 데이터를 복사하여 람다 캡처로 전달
+				TSharedPtr<FHttpServerRequest> RequestCopy = MakeShareable(new FHttpServerRequest(Request));
+				FHttpResultCallback OnCompleteCopy = OnComplete;
+
+				AsyncTask(ENamedThreads::GameThread, [WeakThis, RequestCopy, OnCompleteCopy]()
 				{
-					HandleRequests(Request, OnComplete);
-					return true;
-				})
+					if (WeakThis.IsValid())
+					{
+						WeakThis->HandleRequests(*RequestCopy, OnCompleteCopy);
+					}
+					else
+					{
+						UE_LOG(LogTemp, Warning, TEXT("WakgamesCallbackServer: self.instance is no longer valid on game thread"));
+					}
+				});
+				return true;
+			})
 		);
 
-		HttpServerModule.StartAllListeners();
 		SetbRunning(true);
-		UE_LOG(LogTemp, Log,
-		       TEXT("WakGamesCallbackServer : Server started on port %d, (bRunning: %d)"),
-		       ListenPort, GetbRunning());
+		if (GetbRunning())
+		{
+			HttpServerModule.StartAllListeners();
+			UE_LOG(LogTemp, Warning,
+				   TEXT("WakGamesCallbackServer : Server started on port %d, (bRunning: %d)"),
+				   ListenPort, GetbRunning());
+			return true;	
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Failed to create HttpRouter"));
+			return false;
+		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Failed to create HttpRouter"));
+		UE_LOG(LogTemp, Error, TEXT("WakGamesCallbackServer : Failed to get HttpRouter"));
+		return false;
 	}
 }
 
 void UWakgamesCallbackServer::HandleRequests(const FHttpServerRequest& Request,
                                              const FHttpResultCallback& OnComplete)
 {
+	if (!WakGamesSubsystem)
+	{
+		UE_LOG(LogTemp, Error, TEXT("WakGamesSubsystem is null"));
+		// 500 Internal Server Error 반환
+		TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(
+			TEXT("Internal Server Error"), TEXT("text/plain"));
+		Response->Code = EHttpServerResponseCodes::ServerError;
+		OnComplete(MoveTemp(Response));
+		return;
+	}
+	
 	if (Request.RelativePath.GetPath().Left(9).Equals(TEXT("/callback"), ESearchCase::IgnoreCase))
 	{
 		TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(

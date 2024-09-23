@@ -35,18 +35,17 @@ void UWakSDK_GameInstanceSubsystem::StartLogin()
 	CodeVerifier = UWakGamesAuth::GenerateCodeVerifier();
 	CodeChallenge = UWakGamesAuth::GenerateCodeChallenge(CodeVerifier);
 
-	// 콜백 서버 시작
-	if (CallbackServer == nullptr)
-	{
-		CallbackServer = NewObject<UWakgamesCallbackServer>(this);
-		CallbackServer->AddToRoot();
-	}
-	else
+	// 기존 콜백 서버가 있으면 종료하고 삭제
+	if (CallbackServer != nullptr)
 	{
 		CallbackServer->StopServer();
+		CallbackServer->ConditionalBeginDestroy();
 		CallbackServer = nullptr;
-		StartLogin();
 	}
+	// 새로운 콜백 서버 생성
+	CallbackServer = NewObject<UWakgamesCallbackServer>(this);
+	CallbackServer->AddToRoot();
+	
 
 	if (!CallbackServer->OnTokenIssued.IsAlreadyBound(
 		this, &UWakSDK_GameInstanceSubsystem::OnTokenIssued))
@@ -57,26 +56,29 @@ void UWakSDK_GameInstanceSubsystem::StartLogin()
 	CallbackServer->SetClientId(ClientId);
 	CallbackServer->SetCsrfState(CsrfState);
 	CallbackServer->SetCodeVerifier(CodeVerifier);
-	CallbackServer->StartServer(CallbackServerPort, this);
+	bool bIsClearToLaunch = CallbackServer->RestartServer(CallbackServerPort, this);
 
-	// OAuth 인증 페이지 열기
-	FString AuthUri = FString::Printf(
-		TEXT(
-			"%s/oauth/authorize?responseType=code&clientId=%s&state=%s&callbackUri=%s&challengeMethod=S256&challenge=%s"),
-		*Host, *CallbackServer->GetClientId(), *CallbackServer->GetCsrfState(),
-		*FGenericPlatformHttp::UrlEncode(
-			FString::Printf(TEXT("http://localhost:%d/callback"), CallbackServerPort)),
-		*CodeChallenge);
-	UE_LOG(LogTemp, Error, TEXT("왁겜즈 로그인 시작 : \"딸깍\""));
-	FPlatformProcess::LaunchURL(*AuthUri, nullptr, nullptr);
+	if (bIsClearToLaunch)
+	{
+		// OAuth 인증 페이지 열기
+		FString AuthUri = FString::Printf(
+			TEXT(
+				"%s/oauth/authorize?responseType=code&clientId=%s&state=%s&callbackUri=%s&challengeMethod=S256&challenge=%s"),
+			*Host, *CallbackServer->GetClientId(), *CallbackServer->GetCsrfState(),
+			*FGenericPlatformHttp::UrlEncode(
+				FString::Printf(TEXT("http://localhost:%d/callback"), CallbackServerPort)),
+			*CodeChallenge);
+		UE_LOG(LogTemp, Error, TEXT("왁겜즈 로그인 시작 : \"딸깍\""));
+		FPlatformProcess::LaunchURL(*AuthUri, nullptr, nullptr);
 
-	// FTimerHandle TimerHandle;
-	// GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
-	// {
-	// 	UE_LOG(LogTemp, Warning, TEXT("Login Timeout"));
-	// 	if (CallbackServer)
-	// 	CallbackServer->StopServer();
-	// }, 60.0f, false);
+		// FTimerHandle TimerHandle;
+		// GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
+		// {
+		// 	UE_LOG(LogTemp, Warning, TEXT("Login Timeout"));
+		// 	if (CallbackServer)
+		// 	CallbackServer->StopServer();
+		// }, 60.0f, false);	
+	}
 }
 
 void UWakSDK_GameInstanceSubsystem::RefreshToken()
@@ -235,13 +237,16 @@ void UWakSDK_GameInstanceSubsystem::OnGetUserProfileReceived(FHttpRequestPtr Req
 
 void UWakSDK_GameInstanceSubsystem::ApiMethod(const FString& Api, const FString& Verb,
                                               const FString& Content,
-                                              TFunction<void(FHttpResponsePtr, bool)> Callback, bool bIsRetry)
+                                              TFunction<void(FHttpResponsePtr, bool)> Callback,
+                                              bool bIsRetry)
 {
 	FString Url = FString::Printf(TEXT("%s/%s"), *Host, *Api);
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 	Request->OnProcessRequestComplete().BindLambda(
-		[this, Callback, Api, Verb, Content, bIsRetry](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+		[this, Callback, Api, Verb, Content, bIsRetry](FHttpRequestPtr Request,
+		                                               FHttpResponsePtr Response,
+		                                               bool bWasSuccessful)
 		{
 			if (bWasSuccessful)
 			{
@@ -253,20 +258,21 @@ void UWakSDK_GameInstanceSubsystem::ApiMethod(const FString& Api, const FString&
 				{
 					// 인증 실패, 토큰 갱신 시도
 					RefreshToken();
-					OnTokenRefreshCompleted.AddLambda([this, Api, Verb, Content, Callback](bool bRefreshSuccess)
-					{
-						if (bRefreshSuccess)
+					OnTokenRefreshCompleted.AddLambda(
+						[this, Api, Verb, Content, Callback](bool bRefreshSuccess)
 						{
-							// API 호출 재시도
-							ApiMethod(Api, Verb, Content, Callback, true);
-						}
-						else
-						{
-							// 토큰 갱신 실패, 로그아웃 처리
-							Logout();
-							Callback(nullptr, false);
-						}
-					});
+							if (bRefreshSuccess)
+							{
+								// API 호출 재시도
+								ApiMethod(Api, Verb, Content, Callback, true);
+							}
+							else
+							{
+								// 토큰 갱신 실패, 로그아웃 처리
+								Logout();
+								Callback(nullptr, false);
+							}
+						});
 				}
 				else
 				{
